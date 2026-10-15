@@ -1,17 +1,19 @@
-import { app } from "./app.js";
 import dotenv from "dotenv";
-import connectDB from "./db/index.js";
 
-dotenv.config({
-  path: ".env",
-});
+dotenv.config({ path: "./.env" });
+
+const { app } = await import("./app.js");
+const { default: connectDB } = await import("./db/index.js");
+
+const PORT = process.env.PORT || 7000;
 
 connectDB()
   .then(() => {
-    app.listen(process.env.PORT || 3000, () => {
-      console.log(`Server is running at port: ${process.env.PORT || 3000}`);
+    app.listen(PORT, () => {
+      console.log(`Server is running at port: ${PORT}`);
+      console.log("CORS origin:", process.env.CORS_ORIGIN);
     });
   })
   .catch((error) => {
-    console.log("MongoDB connection failed!!", error);
+    console.error("MongoDB connection failed!!", error);
   });
