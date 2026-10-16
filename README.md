@@ -1,145 +1,133 @@
-# TaskFlow API
+# TaskFlow
 
-A task management REST API built with Node.js, Express, and MongoDB. TaskFlow supports user authentication, task CRUD operations, task ownership, input validation, and profile avatar uploads.
+TaskFlow is a task-management application with a React frontend and a REST API built with Express and MongoDB. Users can manage their own tasks, track due dates, and review account details through a browser interface.
 
 ## Features
 
-- User registration and login
-- Password hashing with bcrypt
-- JWT access and refresh tokens
-- Cookie-based authentication
-- Protected routes and logout
-- Create, read, update, and delete tasks
-- Task ownership: users can access only their own tasks
-- Task input validation and centralized error handling
-- Profile avatar uploads using Multer and Cloudinary
-- MongoDB integration with Mongoose
+- Register and sign in with a username or email.
+- Create, list, update, and delete tasks, with per-user task ownership.
+- Filter and search tasks by status and text.
+- Review overdue, due-today, and upcoming reminders; completed tasks are excluded.
+- View account profile details.
+- Upload profile avatars through the API using Cloudinary.
+- Validate task inputs and return centralized API errors.
+- Use cookie-based JWT authentication with protected API routes. Access and refresh cookies are HttpOnly; the frontend attempts a shared refresh for concurrent unauthorized requests and returns to the login flow if refresh fails.
 
-## Tech Stack
+## Tech stack
 
-- Node.js
-- Express.js
-- MongoDB
-- Mongoose
-- bcrypt
-- JSON Web Tokens (JWT)
-- Multer
-- Cloudinary
+- **Frontend:** React, Vite, React Router, Axios, Tailwind CSS
+- **Backend:** Node.js, Express, Mongoose, MongoDB
+- **Authentication:** JSON Web Tokens and bcrypt
+- **Avatar storage:** Multer and Cloudinary
 
-## Getting Started
+## Local setup
 
 ### Prerequisites
 
-- Node.js `^20.19.0` or `>=22.12.0`, and npm
-- A MongoDB database
-- A Cloudinary account for avatar uploads
+- Node.js `^20.19.0` or `>=22.12.0`, with npm
+- MongoDB
+- Cloudinary credentials only if you intend to use avatar uploads
 
-### Installation
+### Configure the backend
 
-Clone the repository and enter the project directory:
+From the project root, install the backend dependencies and create a local environment file from the example:
 
 ```bash
-git clone YOUR_GITHUB_REPOSITORY_URL
-cd task-flow
 npm install
+cp .env.example .env
 ```
 
-Create a `.env` file in the project root using `.env.example` as a template. Fill in the required values locally. The default `CORS_ORIGIN` allows the Vite frontend at `http://localhost:5173`; update it if the frontend uses a different origin. Never commit real credentials.
+On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
 
-### Run the server
+Configure these values in `.env`:
 
-Development:
+| Variable | Purpose |
+|---|---|
+| `PORT` | API port; defaults to `7000` |
+| `MONGODB_URI` | MongoDB server connection URI; the application uses the `task-flow` database |
+| `ACCESS_TOKEN_SECRET` | Private signing key for access tokens |
+| `ACCESS_TOKEN_EXPIRY` | Access-token lifetime |
+| `REFRESH_TOKEN_SECRET` | Private signing key for refresh tokens; use a different secret from the access-token secret |
+| `REFRESH_TOKEN_EXPIRY` | Refresh-token lifetime |
+| `CORS_ORIGIN` | Allowed browser origin; the example uses `http://localhost:5173` |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | Cloudinary configuration for avatar uploads |
+
+Use strong private token secrets and do not commit `.env` or real credentials.
+
+Start the API in development mode:
 
 ```bash
 npm run dev
 ```
 
-Production-style start:
+The production-style start script is `npm start`. The API base URL defaults to `http://localhost:7000/api/v1`.
 
-```bash
-npm start
-```
+### Configure and run the frontend
 
-The default development port is `7000`, unless configured otherwise.
-
-### Run the frontend
-
-In a second terminal, configure and start the frontend:
+In a second terminal:
 
 ```bash
 cd frontend
 npm install
-```
-
-Create `frontend/.env` from `frontend/.env.example` and set `VITE_API_BASE_URL` to the API base URL (default: `http://localhost:7000/api/v1`). Then run:
-
-```bash
+cp .env.example .env
 npm run dev
 ```
 
-If the frontend origin or API port changes, update `CORS_ORIGIN` in the backend `.env` and `VITE_API_BASE_URL` in the frontend `.env` to match.
+On Windows PowerShell, use `Copy-Item .env.example .env`. Set `VITE_API_BASE_URL` in `frontend/.env` to the API base URL; the example points to `http://localhost:7000/api/v1`. If the frontend origin changes, update backend `CORS_ORIGIN` to match. The API enables credentialed CORS for that configured origin.
 
-## API Endpoints
+Useful frontend scripts, run from `frontend/`:
+
+```bash
+npm run lint
+npm run build
+```
+
+## API overview
 
 Base URL: `http://localhost:7000/api/v1`
 
-### Health
-
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/health` | Check API status |
-
-### Users
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/users/register` | Register a user |
+| GET | `/health` | API health check |
+| POST | `/users/register` | Register an account |
 | POST | `/users/login` | Log in |
-| POST | `/users/logout` | Log out |
+| POST | `/users/logout` | Log out and clear authentication cookies |
 | POST | `/users/refresh-token` | Refresh authentication cookies |
 | GET | `/users/current-user` | Get the authenticated user |
 | PATCH | `/users/update-account` | Update account details |
 | PATCH | `/users/avatar` | Upload a profile avatar |
-
-### Tasks
-
-| Method | Endpoint | Description |
-|---|---|---|
+| GET | `/tasks` | List the authenticated user's tasks |
 | POST | `/tasks` | Create a task |
-| GET | `/tasks` | Get the authenticated user's tasks |
-| GET | `/tasks/:id` | Get a task by ID |
+| GET | `/tasks/:id` | Get a task |
 | PATCH | `/tasks/:id` | Update a task |
 | DELETE | `/tasks/:id` | Delete a task |
 
-Protected endpoints require authentication. With cookie-based authentication, log in first and ensure your HTTP client sends the authentication cookies.
+Task priorities are `low`, `medium`, and `high`. Task statuses are `pending`, `in_progress`, and `completed`. Registration requires a password of at least eight characters. Task routes and account-update routes require authentication; login, registration, logout, and refresh-token routes are handled separately.
 
-## Task Example
+## Screenshots
 
-```json
-{
-  "title": "Revise backend concepts",
-  "description": "Practice building APIs",
-  "priority": "high",
-  "status": "pending",
-  "dueDate": "2026-10-20"
-}
-```
+### Dashboard
 
-Supported priorities: `low`, `medium`, `high`.
+![TaskFlow dashboard](docs/dashboard.png.png)
 
-Supported statuses: `pending`, `in_progress`, `completed`.
+### Tasks
 
-## Testing
+![Task list](docs/tasks.png.png)
 
-Use Postman to test authentication, task CRUD operations, invalid inputs, task ownership, and avatar uploads.
+### Create a task
 
-## Security
+![Create task form](docs/create-task.png.png)
 
-- Keep environment variables and credentials out of version control.
-- Use strong, private JWT secrets.
-- Configure CORS for trusted frontend origins when using credentialed requests.
-- Use HTTPS in production.
+### Login
 
-## License
+![TaskFlow login](docs/login.png.png)
 
-Add a license before distributing this project publicly.
+## Testing status
+
+The frontend provides `npm run lint` and `npm run build` scripts. Authentication and API checks have also been exercised with isolated or mocked scenarios, but the full browser authentication refresh/expiry flow and integration against a real MongoDB database have not been fully verified. Do not treat those flows as fully certified by this README.
+
+## Security notes
+
+- The browser auth cookies are HttpOnly and use `SameSite=Lax`; the `Secure` cookie flag is enabled when `NODE_ENV` is `production`.
+- Credentialed CORS should be configured for the trusted frontend origin.
+- Keep secrets in local environment files, use strong distinct JWT signing secrets, and use HTTPS in production.
