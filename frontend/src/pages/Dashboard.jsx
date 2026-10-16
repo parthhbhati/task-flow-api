@@ -1,76 +1,119 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight,
   ArrowRight,
   CalendarDays,
   CheckCircle2,
-  Circle,
   Clock3,
   ListTodo,
   Plus,
   Sparkles,
   Target,
+  Trash2,
 } from "lucide-react";
 import StatCard from "../components/ui/StatCard";
 import StatusBadge from "../components/ui/StatusBadge";
-
-const initialTasks = [
-  {
-    _id: "demo-1",
-    title: "Revise backend concepts",
-    description: "Practice building APIs",
-    priority: "high",
-    status: "pending",
-    dueDate: "2026-10-20",
-  },
-  {
-    _id: "demo-2",
-    title: "Build the TaskFlow frontend",
-    description: "Create reusable React components",
-    priority: "medium",
-    status: "in_progress",
-    dueDate: "2026-10-22",
-  },
-  {
-    _id: "demo-3",
-    title: "Review MongoDB database",
-    description: "Check schemas and data models",
-    priority: "low",
-    status: "completed",
-    dueDate: "2026-10-18",
-  },
-  {
-    _id: "demo-4",
-    title: "Write project documentation",
-    description: "Prepare README and API docs",
-    priority: "medium",
-    status: "pending",
-    dueDate: "2026-10-25",
-  },
-];
+import api, { getApiErrorMessage } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 const filters = ["all", "pending", "in_progress", "completed"];
 
 function formatDate(date) {
-  if (!date) return "No due date";
+  const dateKey = getTaskDateKey(date);
+  return dateKey ? formatDateKey(dateKey) : "No due date";
+}
 
-  const parsed = new Date(date);
+function getLocalDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
-  if (Number.isNaN(parsed.getTime())) return "No due date";
+function getTaskDateKey(value) {
+  if (typeof value !== "string") return null;
 
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value);
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    parsed.getUTCFullYear() !== Number(year) ||
+    parsed.getUTCMonth() !== Number(month) - 1 ||
+    parsed.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateKey(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
   return new Intl.DateTimeFormat("en", {
     month: "short",
     day: "numeric",
-  }).format(parsed);
+  }).format(new Date(year, month - 1, day));
 }
 
-function Dashboard({ activePage, onNavigate }) {
-  const [tasks, setTasks] = useState(initialTasks);
+function Dashboard({ activePage, onNavigate, createTaskRequest }) {
+  const { user } = useAuth();
+  const [clock, setClock] = useState(() => new Date());
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newPriority, setNewPriority] = useState("medium");
+  const [createForm, setCreateForm] = useState({
+    title: "",
+    description: "",
+    priority: "medium",
+    status: "pending",
+    dueDate: "",
+  });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [updatingStatus, setUpdatingStatus] = useState({});
+  const [statusErrors, setStatusErrors] = useState({});
+  const [deletingTasks, setDeletingTasks] = useState({});
+  const [deleteErrors, setDeleteErrors] = useState({});
+
+  useEffect(() => {
+    if (createTaskRequest > 0) {
+      setShowCreateForm(true);
+    }
+  }, [createTaskRequest]);
+
+  useEffect(() => {
+    const now = new Date();
+    const nextHour = new Date(now);
+    nextHour.setMinutes(0, 0, 0);
+    nextHour.setHours(nextHour.getHours() + 1);
+
+    const timer = window.setTimeout(() => setClock(new Date()), nextHour - now);
+    return () => window.clearTimeout(timer);
+  }, [clock]);
+
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await api.get("/tasks");
+      setTasks(response.data.data);
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks, retryCount]);
 
   useEffect(() => {
     const handleSearch = (event) => setSearch(event.detail || "");
@@ -91,7 +134,9 @@ function Dashboard({ activePage, onNavigate }) {
         .includes(search.toLowerCase());
 
       const matchesPage =
-        activePage !== "My Tasks" || task.status !== "completed";
+        activePage !== "My Tasks" ||
+        filter === "completed" ||
+        task.status !== "completed";
 
       return matchesFilter && matchesSearch && matchesPage;
     });
@@ -103,43 +148,227 @@ function Dashboard({ activePage, onNavigate }) {
     (task) => task.status === "in_progress",
   ).length;
   const completed = tasks.filter((task) => task.status === "completed").length;
+  const todayKey = getLocalDateKey(clock);
+  const seventhDay = new Date(clock.getFullYear(), clock.getMonth(), clock.getDate() + 7);
+  const lastUpcomingKey = getLocalDateKey(seventhDay);
+  const reminders = useMemo(() => {
+    const groups = { overdue: [], today: [], upcoming: [] };
 
-  function handleCreateTask(event) {
-    event.preventDefault();
+    tasks.forEach((task) => {
+      if (task.status === "completed") return;
+      const dueDateKey = getTaskDateKey(task.dueDate);
+      if (!dueDateKey) return;
 
-    const title = newTitle.trim();
-    if (!title) return;
+      if (dueDateKey < todayKey) groups.overdue.push(task);
+      else if (dueDateKey === todayKey) groups.today.push(task);
+      else if (dueDateKey <= lastUpcomingKey) groups.upcoming.push(task);
+    });
 
-    setTasks((current) => [
-      {
-        _id: crypto.randomUUID(),
-        title,
-        description: "Created in the UI preview",
-        priority: newPriority,
-        status: "pending",
-        dueDate: "",
-      },
-      ...current,
-    ]);
+    return groups;
+  }, [tasks, todayKey, lastUpcomingKey]);
+  const greeting = clock.getHours() < 5
+    ? "Good night!"
+    : clock.getHours() < 12
+      ? "Good morning!"
+    : clock.getHours() < 17
+      ? "Good afternoon!"
+      : "Good evening!";
 
-    setNewTitle("");
-    setNewPriority("medium");
-    setShowCreateForm(false);
-    setFilter("all");
-    onNavigate("Dashboard");
+  if (activePage === "Profile") {
+    const profileFields = [
+      ["Name", user?.fullName ?? user?.name],
+      ["Username", user?.username],
+      ["Email", user?.email],
+    ].filter(([, value]) => typeof value === "string" && value.trim());
+
+    return (
+      <section className="max-w-3xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Profile</h1>
+          <p className="mt-2 text-sm text-slate-500">Your account information.</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          {profileFields.length ? (
+            <dl className="divide-y divide-slate-100">
+              {profileFields.map(([label, value]) => (
+                <div key={label} className="grid gap-1 py-4 first:pt-0 last:pb-0 sm:grid-cols-[140px_1fr] sm:gap-4">
+                  <dt className="text-sm font-medium text-slate-500">{label}</dt>
+                  <dd className="break-all text-sm font-semibold text-slate-900">{value.trim()}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="text-sm text-slate-500">No profile information is available.</p>
+          )}
+        </div>
+      </section>
+    );
   }
 
-  function toggleTaskStatus(id) {
-    setTasks((current) =>
-      current.map((task) =>
-        task._id === id
-          ? {
-              ...task,
-              status: task.status === "completed" ? "pending" : "completed",
-            }
-          : task,
-      ),
+  if (activePage === "Reminders") {
+    const sections = [
+      { key: "overdue", title: "Overdue", tasks: reminders.overdue, tone: "text-red-700" },
+      { key: "today", title: "Due today", tasks: reminders.today, tone: "text-amber-700" },
+      { key: "upcoming", title: "Upcoming · next 7 days", tasks: reminders.upcoming, tone: "text-blue-700" },
+    ];
+    const hasReminders = sections.some((section) => section.tasks.length > 0);
+
+    return (
+      <section className="max-w-4xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Reminders</h1>
+          <p className="mt-2 text-sm text-slate-500">Incomplete tasks with due dates that need your attention.</p>
+        </div>
+
+        {!loading && error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">
+            <p>{error}</p>
+            <button
+              type="button"
+              onClick={() => setRetryCount((count) => count + 1)}
+              disabled={loading}
+              className="mt-3 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {loading ? (
+          <p className="rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500" role="status">
+            Loading your reminders...
+          </p>
+        ) : !error && !hasReminders ? (
+          <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center shadow-sm">
+            <CalendarDays size={24} className="mx-auto text-slate-400" />
+            <h2 className="mt-3 font-semibold text-slate-800">No reminders</h2>
+            <p className="mt-1 text-sm text-slate-500">You have no incomplete tasks due today or within the next seven days.</p>
+          </div>
+        ) : !error && sections.map((section) => (
+          section.tasks.length > 0 && (
+            <div key={section.key} className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+              <h2 className={`border-b border-slate-100 px-5 py-4 font-semibold ${section.tone}`}>{section.title}</h2>
+              <ul className="divide-y divide-slate-100">
+                {section.tasks.map((task) => (
+                  <li key={task._id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-800">{task.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">Due {formatDateKey(getTaskDateKey(task.dueDate))}</p>
+                    </div>
+                    <StatusBadge value={task.priority} type="priority" />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        ))}
+      </section>
     );
+  }
+
+  function handleCreateFormChange(event) {
+    const { name, value } = event.target;
+    setCreateForm((current) => ({ ...current, [name]: value }));
+    setCreateError("");
+  }
+
+  async function handleCreateTask(event) {
+    event.preventDefault();
+    const title = createForm.title.trim();
+
+    if (!title) {
+      setCreateError("Enter a task title before saving.");
+      return;
+    }
+
+    const taskInput = {
+      title,
+      description: createForm.description,
+      priority: createForm.priority,
+      status: createForm.status,
+    };
+
+    if (createForm.dueDate) {
+      taskInput.dueDate = createForm.dueDate;
+    }
+
+    setCreating(true);
+    setCreateError("");
+
+    try {
+      const response = await api.post("/tasks", taskInput);
+      const createdTask = response.data.data;
+
+      setTasks((current) => [createdTask, ...current]);
+      setFilter("all");
+      setCreateForm({
+        title: "",
+        description: "",
+        priority: "medium",
+        status: "pending",
+        dueDate: "",
+      });
+      setShowCreateForm(false);
+    } catch (requestError) {
+      const apiErrors = requestError.response?.data?.errors;
+      const details = Array.isArray(apiErrors) ? apiErrors.join(" ") : "";
+      setCreateError(
+        [getApiErrorMessage(requestError), details]
+          .filter(Boolean)
+          .join(" "),
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleStatusChange(taskId, status) {
+    setUpdatingStatus((current) => ({ ...current, [taskId]: true }));
+    setStatusErrors((current) => ({ ...current, [taskId]: "" }));
+
+    try {
+      const response = await api.patch(`/tasks/${taskId}`, { status });
+      const updatedTask = response.data.data;
+      setTasks((current) =>
+        current.map((task) =>
+          task._id === taskId ? updatedTask : task,
+        ),
+      );
+    } catch (requestError) {
+      const apiErrors = requestError.response?.data?.errors;
+      const details = Array.isArray(apiErrors) ? apiErrors.join(" ") : "";
+      setStatusErrors((current) => ({
+        ...current,
+        [taskId]: [getApiErrorMessage(requestError), details]
+          .filter(Boolean)
+          .join(" "),
+      }));
+    } finally {
+      setUpdatingStatus((current) => ({ ...current, [taskId]: false }));
+    }
+  }
+
+  async function handleDeleteTask(task) {
+    const confirmed = window.confirm(
+      `Delete "${task.title}"? This action cannot be undone.`,
+    );
+
+    if (!confirmed) return;
+
+    setDeletingTasks((current) => ({ ...current, [task._id]: true }));
+    setDeleteErrors((current) => ({ ...current, [task._id]: "" }));
+
+    try {
+      await api.delete(`/tasks/${task._id}`);
+      setTasks((current) => current.filter((item) => item._id !== task._id));
+    } catch (requestError) {
+      setDeleteErrors((current) => ({
+        ...current,
+        [task._id]: getApiErrorMessage(requestError),
+      }));
+    } finally {
+      setDeletingTasks((current) => ({ ...current, [task._id]: false }));
+    }
   }
 
   return (
@@ -152,7 +381,7 @@ function Dashboard({ activePage, onNavigate }) {
           </div>
 
           <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            {activePage === "My Tasks" ? "My Tasks" : "Good morning!"}
+            {activePage === "My Tasks" ? "My Tasks" : greeting}
           </h1>
 
           <p className="mt-2 text-sm text-slate-500 sm:text-base">
@@ -161,13 +390,16 @@ function Dashboard({ activePage, onNavigate }) {
               : "A little progress each day adds up to big results."}
           </p>
         </div>
-
         <button
-          onClick={() => setShowCreateForm((visible) => !visible)}
+          type="button"
+          onClick={() => {
+            setShowCreateForm((visible) => !visible);
+            setCreateError("");
+          }}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5 hover:shadow-xl"
         >
           <Plus size={18} />
-          Create task
+          {showCreateForm ? "Cancel" : "Create task"}
         </button>
       </section>
 
@@ -176,44 +408,94 @@ function Dashboard({ activePage, onNavigate }) {
           onSubmit={handleCreateTask}
           className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6"
         >
-          <h2 className="text-lg font-semibold">Create a task</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Create a task</h2>
 
-          <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_180px_auto]">
-            <input
-              autoFocus
-              value={newTitle}
-              onChange={(event) => setNewTitle(event.target.value)}
-              placeholder="What needs to get done?"
-              maxLength={120}
-              required
-              className="min-w-0 rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
-            />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+              Title <span className="text-red-600" aria-hidden="true">*</span>
+              <input
+                name="title"
+                value={createForm.title}
+                onChange={handleCreateFormChange}
+                placeholder="What needs to get done?"
+                maxLength={120}
+                required
+                aria-invalid={Boolean(createError)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+              />
+            </label>
 
-            <select
-              value={newPriority}
-              onChange={(event) => setNewPriority(event.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-blue-400"
-            >
-              <option value="low">Low priority</option>
-              <option value="medium">Medium priority</option>
-              <option value="high">High priority</option>
-            </select>
+            <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+              Description
+              <textarea
+                name="description"
+                value={createForm.description}
+                onChange={handleCreateFormChange}
+                rows={3}
+                placeholder="Add a few details (optional)"
+                className="mt-2 w-full resize-y rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+              />
+            </label>
 
-            <button
-              type="submit"
-              className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700"
-            >
-              Add task
-            </button>
+            <label className="text-sm font-medium text-slate-700">
+              Priority
+              <select
+                name="priority"
+                value={createForm.priority}
+                onChange={handleCreateFormChange}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-blue-400"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+
+            <label className="text-sm font-medium text-slate-700">
+              Status
+              <select
+                name="status"
+                value={createForm.status}
+                onChange={handleCreateFormChange}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-blue-400"
+              >
+                <option value="pending">Pending</option>
+                <option value="in_progress">In progress</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+
+            <label className="text-sm font-medium text-slate-700">
+              Due date <span className="font-normal text-slate-400">(optional)</span>
+              <input
+                type="date"
+                name="dueDate"
+                value={createForm.dueDate}
+                onChange={handleCreateFormChange}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-blue-400"
+              />
+            </label>
           </div>
 
-          <p className="mt-3 text-xs text-slate-500">
-            This is temporary UI state; API persistence comes next.
-          </p>
+          {createError && (
+            <p className="mt-4 text-sm text-red-700" role="alert">
+              {createError}
+            </p>
+          )}
+
+          <div className="mt-5 flex justify-end">
+            <button
+              type="submit"
+              disabled={creating}
+              className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creating ? "Saving task..." : "Save task"}
+            </button>
+          </div>
         </form>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {!loading && !error && <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Total tasks"
           value={total}
@@ -242,7 +524,7 @@ function Dashboard({ activePage, onNavigate }) {
           icon={CheckCircle2}
           tone="green"
         />
-      </section>
+      </section>}
 
       <section className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm shadow-slate-200/30">
@@ -281,29 +563,53 @@ function Dashboard({ activePage, onNavigate }) {
           </div>
 
           <div className="divide-y divide-slate-100">
-            {filteredTasks.map((task) => (
+            {loading && (
+              <p className="px-6 py-14 text-center text-sm text-slate-500" role="status">
+                Loading your tasks...
+              </p>
+            )}
+
+            {!loading && error && (
+              <div className="px-6 py-14 text-center" role="alert">
+                <p className="text-sm text-red-700">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => setRetryCount((count) => count + 1)}
+                  className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {!loading && !error && tasks.length === 0 && (
+              <div className="px-6 py-14 text-center">
+                <h3 className="font-semibold text-slate-800">No tasks yet</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Your tasks will appear here when you create one.
+                </p>
+              </div>
+            )}
+
+            {!loading && !error && filteredTasks.map((task) => (
               <article
                 key={task._id}
                 className="flex items-start gap-3 px-5 py-5 transition hover:bg-slate-50/80 sm:items-center sm:px-6"
               >
-                <button
-                  onClick={() => toggleTaskStatus(task._id)}
-                  aria-label={`Mark ${task.title} ${
-                    task.status === "completed" ? "incomplete" : "complete"
-                  }`}
-                  title="Toggle completion"
-                  className={`mt-0.5 shrink-0 transition sm:mt-0 ${
+                <span
+                  aria-label={task.status === "completed" ? "Completed" : "Not completed"}
+                  className={`mt-0.5 shrink-0 sm:mt-0 ${
                     task.status === "completed"
                       ? "text-emerald-500"
-                      : "text-slate-300 hover:text-blue-600"
+                      : "text-slate-300"
                   }`}
                 >
                   {task.status === "completed" ? (
                     <CheckCircle2 size={21} />
                   ) : (
-                    <Circle size={21} />
+                    <Clock3 size={21} />
                   )}
-                </button>
+                </span>
 
                 <div className="min-w-0 flex-1">
                   <p
@@ -320,10 +626,44 @@ function Dashboard({ activePage, onNavigate }) {
                     {task.description}
                   </p>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2 sm:hidden">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <StatusBadge value={task.priority} type="priority" />
-                    <StatusBadge value={task.status} />
+                    <label className="sr-only" htmlFor={`status-${task._id}`}>
+                      Status for {task.title}
+                    </label>
+                    <select
+                      id={`status-${task._id}`}
+                      value={task.status}
+                      onChange={(event) =>
+                        handleStatusChange(task._id, event.target.value)
+                      }
+                      disabled={Boolean(updatingStatus[task._id])}
+                      aria-describedby={
+                        statusErrors[task._id]
+                          ? `status-error-${task._id}`
+                          : undefined
+                      }
+                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-blue-400 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
                   </div>
+                  {statusErrors[task._id] && (
+                    <p
+                      id={`status-error-${task._id}`}
+                      className="mt-2 text-xs text-red-700"
+                      role="alert"
+                    >
+                      {statusErrors[task._id]}
+                    </p>
+                  )}
+                  {deleteErrors[task._id] && (
+                    <p className="mt-2 text-xs text-red-700" role="alert">
+                      {deleteErrors[task._id]}
+                    </p>
+                  )}
                 </div>
 
                 <div className="hidden shrink-0 items-center gap-5 sm:flex">
@@ -333,12 +673,22 @@ function Dashboard({ activePage, onNavigate }) {
                   </div>
 
                   <StatusBadge value={task.priority} type="priority" />
-                  <StatusBadge value={task.status} />
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTask(task)}
+                  disabled={Boolean(deletingTasks[task._id])}
+                  aria-label={`Delete ${task.title}`}
+                  title="Delete task"
+                  className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Trash2 size={18} />
+                </button>
               </article>
             ))}
 
-            {filteredTasks.length === 0 && (
+            {!loading && !error && tasks.length > 0 && filteredTasks.length === 0 && (
               <div className="px-6 py-14 text-center">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
                   <Target size={22} />
@@ -347,7 +697,7 @@ function Dashboard({ activePage, onNavigate }) {
                   No tasks found
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">
-                  Try another filter or create a new task.
+                  Try another filter or search term.
                 </p>
               </div>
             )}

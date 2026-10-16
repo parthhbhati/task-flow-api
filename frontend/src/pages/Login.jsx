@@ -8,7 +8,7 @@ import { useAuth } from "../context/AuthContext";
 function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, logoutError } = useAuth();
   const [form, setForm] = useState({
     username: "",
     password: "",
@@ -32,8 +32,11 @@ function Login() {
     setLoading(true);
 
     try {
+      const identifier = form.username.trim();
       const response = await api.post("/users/login", {
-        username: form.username.trim(),
+        // Usernames may contain "@", so let the backend search both fields.
+        username: identifier,
+        email: identifier,
         password: form.password,
       });
 
@@ -129,12 +132,12 @@ function Login() {
             </div>
           </div>
 
-          {error && (
+          {(error || logoutError) && (
             <div
               role="alert"
               className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
             >
-              {error}
+              {error || `Logout request failed; your local session was cleared. ${logoutError}`}
             </div>
           )}
 

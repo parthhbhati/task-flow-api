@@ -10,6 +10,18 @@ const authCookieOptions = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax",
 };
+const MIN_PASSWORD_LENGTH = 8;
+
+const verifyLogoutCredential = (token, secret) => {
+  if (!token) return null;
+
+  try {
+    return jwt.verify(token, secret);
+  } catch (error) {
+    if (error instanceof jwt.JsonWebTokenError) return null;
+    throw error;
+  }
+};
 
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
@@ -32,6 +44,13 @@ const registerUser = asyncHandler(async (req, res) => {
   const { fullName, username, email, password } = req.body;
   if (!fullName || !username || !email || !password)
     throw new ApiError(400, "All fields are required");
+  if (typeof password !== "string")
+    throw new ApiError(400, "Password must be a string");
+  if (password.length < MIN_PASSWORD_LENGTH)
+    throw new ApiError(
+      400,
+      `Password must be at least ${MIN_PASSWORD_LENGTH} characters long`,
+    );
 
   const existingUser = await User.findOne({
     $or: [{ username }, { email }],
@@ -87,7 +106,6 @@ const loginUser = asyncHandler(async (req, res) => {
         200,
         {
           user: loggedInUser,
-          accessToken,
         },
         "User logged in Successfully",
       ),
@@ -95,11 +113,43 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(req.user._id, {
-    $unset: {
-      refreshToken: 1,
-    },
-  });
+  const accessToken =
+    req.cookies?.accessToken ||
+    req.header("Authorization")?.replace(/^Bearer\s+/i, "");
+  const incomingRefreshToken = req.cookies?.refreshToken;
+  const decodedAccessToken = verifyLogoutCredential(
+    accessToken,
+    process.env.ACCESS_TOKEN_SECRET,
+  );
+  const decodedRefreshToken = verifyLogoutCredential(
+    incomingRefreshToken,
+    process.env.REFRESH_TOKEN_SECRET,
+  );
+  const accessUserId = decodedAccessToken?._id
+    ? String(decodedAccessToken._id)
+    : null;
+  const refreshUserId = decodedRefreshToken?._id
+    ? String(decodedRefreshToken._id)
+    : null;
+
+  const credentialsMatch =
+    !accessUserId || !refreshUserId || accessUserId === refreshUserId;
+  const userId = credentialsMatch
+    ? accessUserId || refreshUserId
+    : null;
+  if (userId) {
+    const filter = { _id: userId };
+    if (!accessUserId && incomingRefreshToken) {
+      filter.refreshToken = incomingRefreshToken;
+    }
+
+    await User.findOneAndUpdate(filter, {
+      $unset: {
+        refreshToken: 1,
+      },
+    });
+  }
+
   return res
     .status(200)
     .clearCookie("accessToken", authCookieOptions)

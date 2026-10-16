@@ -4,17 +4,21 @@ import {
   useEffect,
   useState,
 } from "react";
-import api from "../lib/api";
+import api, { getApiErrorMessage } from "../lib/api";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [logoutError, setLogoutError] = useState("");
 
   // Restore the session when the application starts.
   useEffect(() => {
     let active = true;
+    const handleSessionExpired = () => setUser(null);
+
+    window.addEventListener("taskflow:session-expired", handleSessionExpired);
 
     async function restoreSession() {
       try {
@@ -38,18 +42,23 @@ export function AuthProvider({ children }) {
 
     return () => {
       active = false;
+      window.removeEventListener("taskflow:session-expired", handleSessionExpired);
     };
   }, []);
 
   // Save the user returned by a successful login.
   const login = (userData) => {
+    setLogoutError("");
     setUser(userData);
   };
 
-  // Clear the frontend session after a successful logout.
+  // Clear the frontend session even if the server logout request fails.
   const logout = async () => {
+    setLogoutError("");
     try {
       await api.post("/users/logout");
+    } catch (error) {
+      setLogoutError(getApiErrorMessage(error));
     } finally {
       setUser(null);
     }
@@ -61,6 +70,7 @@ export function AuthProvider({ children }) {
     isAuthenticated: Boolean(user),
     login,
     logout,
+    logoutError,
   };
 
   return (

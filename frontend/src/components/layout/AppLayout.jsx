@@ -1,6 +1,6 @@
 import { useState } from "react";
-import Sidebar from "./Sidebar";
-import Topbar from "./Topbar";
+import Sidebar from "./SideBar";
+import Topbar from "./TopBar";
 
 function AppLayout({ children, activePage, onNavigate }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -27,8 +27,9 @@ function AppLayout({ children, activePage, onNavigate }) {
 
       <div className="min-h-screen lg:pl-64">
         <Topbar
-          onMenuClick={() => setMobileMenuOpen(true)}
+          onMenuClick={() => setMobileMenuOpen((open) => !open)}
           onNavigate={onNavigate}
+          mobileMenuOpen={mobileMenuOpen}
         />
 
         <main className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">

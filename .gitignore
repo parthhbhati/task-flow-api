@@ -8,6 +8,10 @@ env
 # Dependencies
 node_modules/
 
+# Build output
+/dist/
+/build/
+
 # Temporary avatar uploads
 public/temp/
 

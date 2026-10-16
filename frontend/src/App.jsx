@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import AppLayout from "./components/layout/AppLayout";
@@ -9,9 +9,23 @@ import Register from "./pages/Register";
 import { checkApiHealth } from "./lib/apiTest";
 
 function DashboardPage() {
+  const [activePage, setActivePage] = useState("Dashboard");
+  const [createTaskRequest, setCreateTaskRequest] = useState(0);
+
+  const handleNavigate = (page) => {
+    setActivePage(page);
+    if (page === "Create Task") {
+      setCreateTaskRequest((request) => request + 1);
+    }
+  };
+
   return (
-    <AppLayout>
-      <Dashboard />
+    <AppLayout activePage={activePage} onNavigate={handleNavigate}>
+      <Dashboard
+        activePage={activePage}
+        onNavigate={handleNavigate}
+        createTaskRequest={createTaskRequest}
+      />
     </AppLayout>
   );
 }

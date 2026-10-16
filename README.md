@@ -30,7 +30,7 @@ A task management REST API built with Node.js, Express, and MongoDB. TaskFlow su
 
 ### Prerequisites
 
-- Node.js and npm
+- Node.js `^20.19.0` or `>=22.12.0`, and npm
 - A MongoDB database
 - A Cloudinary account for avatar uploads
 
@@ -44,7 +44,7 @@ cd task-flow
 npm install
 ```
 
-Create an `env` file in the project root using `.env.example` as a template. Fill in the required values locally. Never commit real credentials.
+Create a `.env` file in the project root using `.env.example` as a template. Fill in the required values locally. The default `CORS_ORIGIN` allows the Vite frontend at `http://localhost:5173`; update it if the frontend uses a different origin. Never commit real credentials.
 
 ### Run the server
 
@@ -61,6 +61,23 @@ npm start
 ```
 
 The default development port is `7000`, unless configured otherwise.
+
+### Run the frontend
+
+In a second terminal, configure and start the frontend:
+
+```bash
+cd frontend
+npm install
+```
+
+Create `frontend/.env` from `frontend/.env.example` and set `VITE_API_BASE_URL` to the API base URL (default: `http://localhost:7000/api/v1`). Then run:
+
+```bash
+npm run dev
+```
+
+If the frontend origin or API port changes, update `CORS_ORIGIN` in the backend `.env` and `VITE_API_BASE_URL` in the frontend `.env` to match.
 
 ## API Endpoints
 
@@ -79,7 +96,9 @@ Base URL: `http://localhost:7000/api/v1`
 | POST | `/users/register` | Register a user |
 | POST | `/users/login` | Log in |
 | POST | `/users/logout` | Log out |
+| POST | `/users/refresh-token` | Refresh authentication cookies |
 | GET | `/users/current-user` | Get the authenticated user |
+| PATCH | `/users/update-account` | Update account details |
 | PATCH | `/users/avatar` | Upload a profile avatar |
 
 ### Tasks

@@ -2,6 +2,7 @@ import {
   CheckSquare,
   LayoutDashboard,
   ListTodo,
+  Bell,
   Plus,
   UserRound,
   X,
@@ -11,6 +12,7 @@ import {
 const navigation = [
   { label: "Dashboard", icon: LayoutDashboard },
   { label: "My Tasks", icon: ListTodo },
+  { label: "Reminders", icon: Bell },
   { label: "Create Task", icon: Plus },
   { label: "Profile", icon: UserRound },
 ];
@@ -59,6 +61,7 @@ function Sidebar({ activePage, onNavigate, mobileMenuOpen }) {
               <button
                 key={label}
                 onClick={() => onNavigate(label)}
+                aria-current={active ? "page" : undefined}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${
                   active
                     ? "bg-blue-600 text-white shadow-lg shadow-blue-950/30"
