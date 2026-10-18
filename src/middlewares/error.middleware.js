@@ -3,6 +3,14 @@ const errorHandler = (err, req, res, next) => {
   let message = err.message || "Internal Server Error";
   let errors = err.errors || [];
 
+  if (err.name === "MulterError") {
+    statusCode = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    message = err.code === "LIMIT_FILE_SIZE"
+      ? "Avatar image must be 5 MB or smaller"
+      : "Avatar upload could not be processed";
+    errors = [];
+  }
+
   if (err.name === "CastError") {
     statusCode = 400;
     message = "Invalid resource ID";

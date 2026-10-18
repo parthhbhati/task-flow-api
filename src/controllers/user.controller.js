@@ -3,7 +3,12 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import jwt from "jsonwebtoken";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import {
+  deleteFromCloudinary,
+  removeTempFile,
+  uploadOnCloudinary,
+} from "../utils/cloudinary.js";
+import { readFile } from "node:fs/promises";
 
 const authCookieOptions = {
   httpOnly: true,
@@ -84,7 +89,7 @@ const loginUser = asyncHandler(async (req, res) => {
   const user = await User.findOne({
     $or: [{ username }, { email }],
   });
-  if (!user) throw new ApiError(404, "User not found");
+  if (!user) throw new ApiError(401, "Invalid login credentials");
 
   const isPasswordValid = await user.isPasswordCorrect(password);
   if (!isPasswordValid) throw new ApiError(401, "Invalid login credentials");
@@ -271,27 +276,61 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
 
 const updateUserAvatar = asyncHandler(async (req, res) => {
   const filePath = req.file?.path;
-  if (!filePath) throw new ApiError(400, "No temporary file found");
+  if (!filePath) throw new ApiError(400, "Avatar image is required");
 
-  const uploadedAvatar = await uploadOnCloudinary(filePath);
-  if (!uploadedAvatar) throw new ApiError(500, "File not uploaded");
+  let uploadedAvatar;
+  try {
+    const bytes = await readFile(filePath);
+    const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const isPng = bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const isWebp = bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+    if (!isJpeg && !isPng && !isWebp) {
+      throw new ApiError(415, "Avatar must contain a valid JPEG, PNG, or WebP image");
+    }
 
-  const user = await User.findByIdAndUpdate(
-    req.user._id,
-    { avatar: uploadedAvatar.secure_url },
-    {
-      new: true,
-      runValidators: true,
-    },
-  ).select("-password -refreshToken");
+    try {
+      uploadedAvatar = await uploadOnCloudinary(filePath);
+    } catch {
+      throw new ApiError(502, "Avatar upload failed. Please try again.");
+    }
+    if (!uploadedAvatar?.secure_url || !uploadedAvatar?.public_id) {
+      throw new ApiError(502, "Avatar upload failed. Please try again.");
+    }
 
-  if (!user) {
-    throw new ApiError(404, "User not found");
+    let user;
+    try {
+      user = await User.findByIdAndUpdate(
+        req.user._id,
+        { avatar: uploadedAvatar.secure_url, avatarPublicId: uploadedAvatar.public_id },
+        { new: true, runValidators: true },
+      ).select("-password -refreshToken");
+    } catch (error) {
+      try {
+        await deleteFromCloudinary(uploadedAvatar.public_id);
+      } catch {
+        // Keep the database error as the primary failure.
+      }
+      throw error;
+    }
+
+    if (!user) {
+      await deleteFromCloudinary(uploadedAvatar.public_id).catch(() => {});
+      throw new ApiError(404, "User not found");
+    }
+
+    const previousPublicId = req.user.avatarPublicId;
+    if (previousPublicId && previousPublicId !== uploadedAvatar.public_id) {
+      await deleteFromCloudinary(previousPublicId).catch((error) => {
+        console.error("Previous avatar cleanup failed:", error.message);
+      });
+    }
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, user, "Avatar updated successfully"));
+  } finally {
+    await removeTempFile(filePath);
   }
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user, "Avatar updated successfully!!"));
 });
 
 export {

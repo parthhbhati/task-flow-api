@@ -23,29 +23,36 @@ const uploadOnCloudinary = async (localFilePath) => {
     throw new Error("A local file path is required for Cloudinary upload");
   }
 
-  try {
-    const cloudinaryConfig = {
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
-    };
-    const missingConfig = Object.entries(cloudinaryConfig)
-      .filter(([, value]) => !value)
-      .map(([key]) => key);
+  const cloudinaryConfig = {
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  };
+  const missingConfig = Object.entries(cloudinaryConfig)
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
 
-    if (missingConfig.length > 0) {
-      throw new Error(
-        `Missing Cloudinary configuration: ${missingConfig.join(", ")}`,
-      );
-    }
+  if (missingConfig.length > 0) {
+    throw new Error(
+      `Missing Cloudinary configuration: ${missingConfig.join(", ")}`,
+    );
+  }
 
-    cloudinary.config(cloudinaryConfig);
-    return await cloudinary.uploader.upload(localFilePath, {
-      resource_type: "auto",
-    });
-  } finally {
-    await removeTempFile(localFilePath);
+  cloudinary.config(cloudinaryConfig);
+  return await cloudinary.uploader.upload(localFilePath, {
+    resource_type: "image",
+    folder: "taskflow/avatars",
+  });
+};
+
+const deleteFromCloudinary = async (publicId) => {
+  if (!publicId) return;
+  const result = await cloudinary.uploader.destroy(publicId, {
+    resource_type: "image",
+  });
+  if (result.result !== "ok" && result.result !== "not found") {
+    throw new Error("Cloudinary could not delete the previous avatar");
   }
 };
 
-export { uploadOnCloudinary };
+export { uploadOnCloudinary, deleteFromCloudinary, removeTempFile };

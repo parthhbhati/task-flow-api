@@ -106,21 +106,25 @@ Task priorities are `low`, `medium`, and `high`. Task statuses are `pending`, `i
 
 ## Screenshots
 
-### Dashboard
+### Dashboard overview
 
-![TaskFlow dashboard](docs/dashboard.png.png)
+![TaskFlow dashboard with task summaries and recent work](docs/dashboard.png)
 
-### Tasks
+### Tasks and status tracking
 
-![Task list](docs/tasks.png.png)
+![Task list with priorities and status controls](docs/tasks.png)
 
 ### Create a task
 
-![Create task form](docs/create-task.png.png)
+![TaskFlow create task form](docs/create-task.png)
 
-### Login
+### Profile and avatar
 
-![TaskFlow login](docs/login.png.png)
+![Profile page displaying the uploaded avatar](docs/profile.png)
+
+### Reminders
+
+![Upcoming and due-today task reminders](docs/reminder.png)
 
 ## Testing status
 

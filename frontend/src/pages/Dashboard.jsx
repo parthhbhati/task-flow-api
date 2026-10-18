@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight,
   ArrowRight,
@@ -7,6 +7,7 @@ import {
   Clock3,
   ListTodo,
   Plus,
+  Pencil,
   Sparkles,
   Target,
   Trash2,
@@ -58,7 +59,13 @@ function formatDateKey(dateKey) {
 }
 
 function Dashboard({ activePage, onNavigate, createTaskRequest }) {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const avatarPreviewUrl = useRef("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState("");
+  const [avatarError, setAvatarError] = useState("");
   const [clock, setClock] = useState(() => new Date());
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +83,10 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState("");
   const [updatingStatus, setUpdatingStatus] = useState({});
   const [statusErrors, setStatusErrors] = useState({});
   const [deletingTasks, setDeletingTasks] = useState({});
@@ -174,7 +185,38 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
       ? "Good afternoon!"
       : "Good evening!";
 
+  useEffect(() => () => {
+    if (avatarPreviewUrl.current) URL.revokeObjectURL(avatarPreviewUrl.current);
+  }, []);
+
+  async function handleAvatarUpload(event) {
+    event.preventDefault();
+    if (!avatarFile) {
+      setAvatarError("Choose an image before uploading.");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("avatar", avatarFile);
+    setAvatarUploading(true);
+    setAvatarError("");
+    setAvatarMessage("");
+    try {
+      const response = await api.patch("/users/avatar", formData);
+      updateUser(response.data.data);
+      if (avatarPreviewUrl.current) URL.revokeObjectURL(avatarPreviewUrl.current);
+      avatarPreviewUrl.current = "";
+      setAvatarPreview("");
+      setAvatarFile(null);
+      setAvatarMessage("Your avatar has been updated.");
+    } catch (requestError) {
+      setAvatarError(getApiErrorMessage(requestError));
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
   if (activePage === "Profile") {
+    const avatarSrc = avatarPreview || user?.avatar || null;
     const profileFields = [
       ["Name", user?.fullName ?? user?.name],
       ["Username", user?.username],
@@ -189,6 +231,51 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
         </div>
 
         <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <form onSubmit={handleAvatarUpload} className="mb-6 flex flex-col gap-5 border-b border-slate-100 pb-6 sm:flex-row sm:items-center">
+            {avatarSrc ? (
+              <img
+                src={avatarSrc}
+                alt={`${user?.fullName || "Your"} avatar`}
+                className="h-24 w-24 rounded-2xl object-cover"
+              />
+            ) : (
+              <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-600 text-2xl font-bold text-white">
+                {(user?.fullName || "TF").slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1">
+              <h2 className="font-semibold text-slate-900">Profile photo</h2>
+              <p className="mt-1 text-sm text-slate-500">JPEG, PNG, or WebP, up to 5 MB.</p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <label className="cursor-pointer rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {avatarFile ? "Choose another" : user?.avatar ? "Change photo" : "Choose photo"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] || null;
+                      if (avatarPreviewUrl.current) {
+                        URL.revokeObjectURL(avatarPreviewUrl.current);
+                      }
+                      avatarPreviewUrl.current = file ? URL.createObjectURL(file) : "";
+                      setAvatarPreview(avatarPreviewUrl.current);
+                      setAvatarFile(file);
+                      setAvatarError("");
+                      setAvatarMessage("");
+                    }}
+                  />
+                </label>
+                {avatarFile && (
+                  <button type="submit" disabled={avatarUploading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+                    {avatarUploading ? "Uploading…" : "Upload photo"}
+                  </button>
+                )}
+              </div>
+              {avatarError && <p role="alert" className="mt-3 text-sm text-red-700">{avatarError}</p>}
+              {avatarMessage && <p role="status" className="mt-3 text-sm text-emerald-700">{avatarMessage}</p>}
+            </div>
+          </form>
           {profileFields.length ? (
             <dl className="divide-y divide-slate-100">
               {profileFields.map(([label, value]) => (
@@ -345,6 +432,51 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
       }));
     } finally {
       setUpdatingStatus((current) => ({ ...current, [taskId]: false }));
+    }
+  }
+
+  function beginTaskEdit(task) {
+    setEditingTaskId(task._id);
+    setEditForm({
+      title: task.title || "",
+      description: task.description || "",
+      priority: task.priority || "medium",
+      status: task.status || "pending",
+      dueDate: getTaskDateKey(task.dueDate) || "",
+    });
+    setEditError("");
+  }
+
+  async function handleEditTask(event, taskId) {
+    event.preventDefault();
+    const title = editForm?.title.trim() || "";
+    if (!title) {
+      setEditError("Enter a task title before saving.");
+      return;
+    }
+
+    const taskInput = {
+      title,
+      description: editForm.description,
+      priority: editForm.priority,
+      status: editForm.status,
+      dueDate: editForm.dueDate || null,
+    };
+
+    setSavingEdit(true);
+    setEditError("");
+    try {
+      const response = await api.patch(`/tasks/${taskId}`, taskInput);
+      const updatedTask = response.data.data;
+      setTasks((current) => current.map((task) => task._id === taskId ? updatedTask : task));
+      setEditingTaskId(null);
+      setEditForm(null);
+    } catch (requestError) {
+      const apiErrors = requestError.response?.data?.errors;
+      const details = Array.isArray(apiErrors) ? apiErrors.join(" ") : "";
+      setEditError([getApiErrorMessage(requestError), details].filter(Boolean).join(" "));
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -594,7 +726,7 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
             {!loading && !error && filteredTasks.map((task) => (
               <article
                 key={task._id}
-                className="flex items-start gap-3 px-5 py-5 transition hover:bg-slate-50/80 sm:items-center sm:px-6"
+                className="flex flex-wrap items-start gap-3 px-5 py-5 transition hover:bg-slate-50/80 sm:items-center sm:px-6"
               >
                 <span
                   aria-label={task.status === "completed" ? "Completed" : "Not completed"}
@@ -677,6 +809,16 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
 
                 <button
                   type="button"
+                  onClick={() => beginTaskEdit(task)}
+                  aria-label={`Edit ${task.title}`}
+                  title="Edit task"
+                  className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
+                >
+                  <Pencil size={18} />
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => handleDeleteTask(task)}
                   disabled={Boolean(deletingTasks[task._id])}
                   aria-label={`Delete ${task.title}`}
@@ -685,6 +827,61 @@ function Dashboard({ activePage, onNavigate, createTaskRequest }) {
                 >
                   <Trash2 size={18} />
                 </button>
+                {editingTaskId === task._id && editForm && (
+                  <form
+                    onSubmit={(event) => handleEditTask(event, task._id)}
+                    className="basis-full rounded-xl border border-blue-100 bg-blue-50/40 p-4 sm:p-5"
+                  >
+                    <h3 className="font-semibold text-slate-900">Edit task</h3>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                        Title <span className="text-red-600" aria-hidden="true">*</span>
+                        <input
+                          name="title"
+                          value={editForm.title}
+                          onChange={(event) => {
+                            setEditForm((current) => ({ ...current, title: event.target.value }));
+                            setEditError("");
+                          }}
+                          maxLength={120}
+                          required
+                          aria-invalid={Boolean(editError)}
+                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50"
+                        />
+                      </label>
+                      <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                        Description
+                        <textarea
+                          value={editForm.description}
+                          onChange={(event) => setEditForm((current) => ({ ...current, description: event.target.value }))}
+                          rows={3}
+                          className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-400"
+                        />
+                      </label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Priority
+                        <select value={editForm.priority} onChange={(event) => setEditForm((current) => ({ ...current, priority: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+                          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                        </select>
+                      </label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Status
+                        <select value={editForm.status} onChange={(event) => setEditForm((current) => ({ ...current, status: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm">
+                          <option value="pending">Pending</option><option value="in_progress">In progress</option><option value="completed">Completed</option>
+                        </select>
+                      </label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Due date <span className="font-normal text-slate-400">(optional)</span>
+                        <input type="date" value={editForm.dueDate} onChange={(event) => setEditForm((current) => ({ ...current, dueDate: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm" />
+                      </label>
+                    </div>
+                    {editError && <p className="mt-4 text-sm text-red-700" role="alert">{editError}</p>}
+                    <div className="mt-5 flex justify-end gap-3">
+                      <button type="button" onClick={() => { setEditingTaskId(null); setEditForm(null); setEditError(""); }} disabled={savingEdit} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-60">Cancel</button>
+                      <button type="submit" disabled={savingEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{savingEdit ? "Saving changes..." : "Save changes"}</button>
+                    </div>
+                  </form>
+                )}
               </article>
             ))}
 

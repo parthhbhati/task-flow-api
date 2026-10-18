@@ -15,6 +15,14 @@ const api = axios.create({
   timeout: 15000,
 });
 
+api.interceptors.request.use((config) => {
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    // Let the browser add the multipart boundary for FormData requests.
+    config.headers.delete("Content-Type");
+  }
+  return config;
+});
+
 let refreshPromise = null;
 let refreshFailed = false;
 

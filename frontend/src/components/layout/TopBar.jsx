@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 
 function Topbar({ onMenuClick, onNavigate, mobileMenuOpen }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
   const [showNotificationsMessage, setShowNotificationsMessage] = useState(false);
 
@@ -83,13 +83,17 @@ function Topbar({ onMenuClick, onNavigate, mobileMenuOpen }) {
           onClick={() => onNavigate("Profile")}
           className="flex items-center gap-3 rounded-xl p-1.5 pr-2 transition hover:bg-slate-100"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 text-sm font-bold text-white">
-            TF
-          </div>
+          {user?.avatar ? (
+            <img src={user.avatar} alt="" className="h-9 w-9 rounded-xl object-cover" />
+          ) : (
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 text-sm font-bold text-white">
+              {(user?.fullName || "TF").slice(0, 2).toUpperCase()}
+            </div>
+          )}
 
           <div className="hidden text-left sm:block">
-            <p className="text-sm font-semibold text-slate-800">My Account</p>
-            <p className="text-xs text-slate-500">Workspace member</p>
+            <p className="text-sm font-semibold text-slate-800">{user?.fullName || "My Account"}</p>
+            <p className="text-xs text-slate-500">{user?.username ? `@${user.username}` : "Workspace member"}</p>
           </div>
         </button>
 

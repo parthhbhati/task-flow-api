@@ -52,6 +52,10 @@ export function AuthProvider({ children }) {
     setUser(userData);
   };
 
+  const updateUser = (userData) => {
+    setUser((currentUser) => ({ ...currentUser, ...userData }));
+  };
+
   // Clear the frontend session even if the server logout request fails.
   const logout = async () => {
     setLogoutError("");
@@ -69,6 +73,7 @@ export function AuthProvider({ children }) {
     loading,
     isAuthenticated: Boolean(user),
     login,
+    updateUser,
     logout,
     logoutError,
   };
