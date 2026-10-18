@@ -25,6 +25,7 @@ api.interceptors.request.use((config) => {
 
 let refreshPromise = null;
 let refreshFailed = false;
+let sessionGeneration = 0;
 
 const excludedAuthRequest = (url = "") =>
   /\/users\/(login|register|refresh-token|logout)(?:[/?#]|$)/.test(url);
@@ -32,6 +33,9 @@ const excludedAuthRequest = (url = "") =>
 api.interceptors.response.use(
   (response) => {
     if (/\/users\/login(?:[/?#]|$)/.test(response.config?.url || "")) {
+      // A successful login starts a new session. Older refresh failures must
+      // not invalidate it when they settle later.
+      sessionGeneration += 1;
       refreshFailed = false;
     }
     return response;
@@ -52,12 +56,15 @@ api.interceptors.response.use(
     originalRequest._retry = true;
 
     if (!refreshPromise) {
+      const refreshGeneration = sessionGeneration;
       refreshPromise = api
         .post("/users/refresh-token")
         .catch((refreshError) => {
-          refreshFailed = true;
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event("taskflow:session-expired"));
+          if (refreshGeneration === sessionGeneration) {
+            refreshFailed = true;
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new Event("taskflow:session-expired"));
+            }
           }
           throw refreshError;
         })

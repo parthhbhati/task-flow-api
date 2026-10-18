@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import api, { getApiErrorMessage } from "../lib/api";
@@ -12,10 +13,12 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [logoutError, setLogoutError] = useState("");
+  const sessionGeneration = useRef(0);
 
   // Restore the session when the application starts.
   useEffect(() => {
     let active = true;
+    const restoreGeneration = sessionGeneration.current;
     const handleSessionExpired = () => setUser(null);
 
     window.addEventListener("taskflow:session-expired", handleSessionExpired);
@@ -24,11 +27,11 @@ export function AuthProvider({ children }) {
       try {
         const response = await api.get("/users/current-user");
 
-        if (active) {
+        if (active && restoreGeneration === sessionGeneration.current) {
           setUser(response.data?.data ?? null);
         }
-      } catch (error) {
-        if (active) {
+      } catch {
+        if (active && restoreGeneration === sessionGeneration.current) {
           setUser(null);
         }
       } finally {
@@ -48,6 +51,7 @@ export function AuthProvider({ children }) {
 
   // Save the user returned by a successful login.
   const login = (userData) => {
+    sessionGeneration.current += 1;
     setLogoutError("");
     setUser(userData);
   };
