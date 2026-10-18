@@ -10,10 +10,11 @@ import {
 } from "../utils/cloudinary.js";
 import { readFile } from "node:fs/promises";
 
+const isProduction = process.env.NODE_ENV === "production";
 const authCookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
+  secure: isProduction,
+  sameSite: isProduction ? "none" : "lax",
 };
 const MIN_PASSWORD_LENGTH = 8;
 
